@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 LoRa Console</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2330; --muted: #5d6677; --line: #dde1e8; --accent: #2457d6; --accent-ink: #ffffff;
+  --ok: #16794a; --bad: #b42318; --warn: #a15c00; --field: #f9fafb; --wf-bg: #0b1020; --chip: #eef1f6;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f131a; --panel: #171c25; --ink: #e6e9ef; --muted: #98a2b3; --line: #2a3140; --accent: #6b93ff; --accent-ink: #0b1020;
+    --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; --field: #11161e; --wf-bg: #05080f; --chip: #222a37;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f131a; --panel: #171c25; --ink: #e6e9ef; --muted: #98a2b3; --line: #2a3140; --accent: #6b93ff; --accent-ink: #0b1020;
+  --ok: #4ade80; --bad: #f87171; --warn: #fbbf24; --field: #11161e; --wf-bg: #05080f; --chip: #222a37;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 17px; margin: 0; letter-spacing: .01em; }
+header .sub { color: var(--muted); font-size: 12.5px; }
+main { padding: 16px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr)); align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.card > .head { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.card .name { font-weight: 600; }
+.card .state { font-size: 12.5px; color: var(--muted); }
+.body { padding: 12px; display: grid; gap: 12px; }
+button { font: inherit; border: 1px solid var(--line); background: var(--field); color: var(--ink); padding: 6px 12px; border-radius: 7px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button:disabled { opacity: .45; cursor: default; }
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tabs button { border: 0; border-radius: 0; padding: 6px 14px; background: transparent; }
+.tabs button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.grid { display: grid; gap: 8px 10px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; width: 100%; min-width: 0; }
+textarea { font-family: var(--mono); resize: vertical; min-height: 52px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.check { display: inline-flex; gap: 6px; align-items: center; color: var(--ink); font-size: 13px; }
+.check input { width: auto; }
+canvas { width: 100%; display: block; background: var(--wf-bg); border-radius: 6px; }
+.stats { font: 12px var(--mono); color: var(--muted); }
+.frames { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 500; }
+td.mono { font-family: var(--mono); word-break: break-all; }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 99px; background: var(--chip); font-size: 12px; }
+.empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+#log { margin: 0 16px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font: 12px var(--mono); color: var(--muted); max-height: 180px; overflow: auto; white-space: pre-wrap; }
+.note { color: var(--muted); font-size: 12.5px; margin: 0; }
+progress { width: 100%; height: 8px; }
+.hidden { display: none !important; }
+.unsupported { margin: 16px; padding: 14px 16px; border: 1px solid var(--bad); border-radius: 10px; color: var(--bad); background: var(--panel); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ESP32-S3 LoRa Console</h1>
+    <div class="sub">LoRa with plain ESP32-S3 boards: the LORA32 modem firmware (flash, 2439.5 MHz) or the esp32-sdr-trx SDR firmware (RAM, 13 cm). Chrome or Edge, boards on their native USB port.</div>
+  </div>
+  <div class="row">
+    <button class="primary" id="add">+ Connect board</button>
+    <button id="theme" title="Light / dark">◐</button>
+  </div>
+</header>
+<div id="unsupported" class="unsupported hidden">This browser has no Web Serial. Open the file in Chrome or Edge (desktop).</div>
+<main id="boards"><div class="empty card" id="placeholder">Connect a board to start. Boards with the esp32-sdr-trx SDR firmware can receive or transmit; boards with LORA32 in their flash work as modems.</div></main>
+<div id="log"></div>
+
+<template id="card-tpl">
+  <section class="card">
+    <div class="head">
+      <div><span class="name"></span> <span class="state"></span></div>
+      <div class="row">
+        <label class="check sdr-only" title="This board's crystal error in ppm (positive if it runs fast). Applied to receiving and transmitting. Two boards can be 40 ppm (100 kHz) apart.">crystal, ppm <input class="ppm" type="number" step="0.5" value="0" style="width:5.5em"></label>
+        <div class="tabs sdr-only"><button data-mode="rx" class="on">Receive</button><button data-mode="tx">Transmit</button></div>
+        <button class="load" title="Load the esp32-sdr-trx SDR firmware into the board's RAM (the flash is not touched; Reboot returns to the flash firmware)">Load SDR firmware</button>
+        <button class="reboot" title="Restart the board from its flash (for example back to LORA32)">Reboot</button>
+        <button class="close">Disconnect</button>
+      </div>
+    </div>
+    <div class="body rx">
+      <div class="grid">
+        <label>Frequency, MHz<input class="rx-freq" type="number" step="0.001" value="2350.000"></label>
+        <label>Gain, dB (−30 … 49.6)<input class="rx-gain" type="number" min="-30" max="49.6" step="1" value="20"></label>
+        <label>Attenuation<select class="rx-atten"><option value="0">0 dB</option><option value="6">6 dB</option><option value="12">12 dB</option><option value="18">18 dB</option><option value="24">24 dB</option><option value="30">30 dB</option><option value="36">36 dB</option><option value="42">42 dB</option><option value="48">48 dB</option></select></label>
+        <label>Spreading factor<select class="rx-sf"></select></label>
+        <label>Bandwidth<select class="rx-bw"></select></label>
+        <label>Sync word<input class="rx-sync" value="0x34"></label>
+      </div>
+      <div class="row">
+        <button class="primary rx-start">Start receiving</button>
+        <button class="rx-stop" disabled>Stop</button>
+        <label class="check"><input type="checkbox" class="rx-wide"> always search the whole window (slower)</label>
+        <label class="check" title="Lowers the gain when samples clip, raises it when the signal is weak (restarts the run, about 50 ms)"><input type="checkbox" class="rx-agc" checked> automatic gain</label>
+        <label class="check" title="When a frame arrives from a board on this page, set that board's crystal correction from where the frame really was (frequency and timing; needed for SF10 and up)"><input type="checkbox" class="rx-cal" checked> correct the sender's crystal</label>
+        <button class="rx-clear">Clear list</button>
+        <button class="rx-save" disabled title="Records 5 s of raw I/Q (complex float32, 250 ksps) to a file">Save 5 s</button>
+      </div>
+      <canvas class="spec" height="110"></canvas>
+      <canvas class="wf" height="150"></canvas>
+      <div class="stats rx-stats">idle</div>
+      <div class="frames"><table><thead><tr><th>Time</th><th>Payload</th><th>CRC</th><th>SNR</th><th>Offset</th></tr></thead><tbody class="rx-list"></tbody></table></div>
+    </div>
+    <div class="body tx hidden">
+      <div class="grid">
+        <label>Frequency, MHz<input class="tx-freq" type="number" step="0.001" min="2320" max="2450" value="2350.050"></label>
+        <label>Power, dB (0 … −17.9)<input class="tx-power" type="number" min="-17.9" max="0" step="0.5" value="0"></label>
+        <label>Spreading factor<select class="tx-sf"></select></label>
+        <label>Bandwidth<select class="tx-bw"></select></label>
+        <label>Coding rate<select class="tx-cr"><option value="1">4/5</option><option value="2">4/6</option><option value="3">4/7</option><option value="4">4/8</option></select></label>
+        <label>Preamble<input class="tx-pre" type="number" min="6" max="64" value="8"></label>
+        <label>Sync word<input class="tx-sync" value="0x34"></label>
+        <label>Repeat<input class="tx-count" type="number" min="1" max="10000" value="1"></label>
+        <label>Interval, s<input class="tx-interval" type="number" min="0.2" step="0.1" value="1"></label>
+      </div>
+      <label>Payload <span class="tx-len"></span><textarea class="tx-payload">HELLO FROM ESP32</textarea></label>
+      <div class="row">
+        <label class="check"><input type="checkbox" class="tx-hex"> payload is hex</label>
+        <label class="check"><input type="checkbox" class="tx-counter" checked> append a counter (#1, #2 …)</label>
+      </div>
+      <div class="row">
+        <button class="primary tx-send">Send</button>
+        <button class="tx-stop" disabled>Stop</button>
+        <span class="stats tx-info"></span>
+      </div>
+      <progress class="tx-progress" value="0" max="1"></progress>
+      <div class="stats tx-stats"></div>
+      <p class="note">Sends in the 13 cm amateur band (2320–2450 MHz): needs an amateur radio licence, or a shielded room. Output is some microwatts.</p>
+    </div>
+    <div class="body modem hidden">
+      <p class="note">LORA32 modem firmware (in the board's flash): LoRa-style SF7, 1.25 MHz wide at 2439.5 MHz; the board encodes and decodes by itself.</p>
+      <div class="grid">
+        <label>Node ID (1–254)<input class="m-node" type="number" min="1" max="254" value="1"></label>
+        <label>Receive gain code<input class="m-gain" type="number" min="0" max="127" value="65"></label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" class="m-rel" checked> acknowledge messages to one node (with retries)</label>
+        <button class="m-start">Restart modem</button>
+        <button class="m-off">Stop modem</button>
+      </div>
+      <div class="grid">
+        <label>Send to (255 = everyone)<input class="m-dest" type="number" min="1" max="255" value="255"></label>
+        <label>Repeat<input class="m-count" type="number" min="1" max="10000" value="1"></label>
+        <label>Interval, s<input class="m-interval" type="number" min="0.2" step="0.1" value="1"></label>
+      </div>
+      <label>Message <span class="m-len"></span><textarea class="m-payload">HELLO FROM ESP32</textarea></label>
+      <div class="row">
+        <label class="check"><input type="checkbox" class="m-hex"> message is hex</label>
+        <label class="check"><input type="checkbox" class="m-counter" checked> append a counter (#1, #2 …)</label>
+      </div>
+      <div class="row">
+        <button class="primary m-send">Send</button>
+        <button class="m-stop" disabled>Stop</button>
+        <span class="stats m-info"></span>
+      </div>
+      <div class="stats m-stats"></div>
+      <div class="frames"><table><thead><tr><th>Time</th><th>From</th><th>To</th><th>Message</th><th>Check</th></tr></thead><tbody class="m-list"></tbody></table></div>
+    </div>
+  </section>
+</template>
+
+<script id="core-src">/*CORE*/</script>
+<script>
+"use strict";
+const C = window.EspCore;
+const FIRMWARE_B64 = "/*FIRMWARE*/";
+let FIRMWARE = null;     // decoded on first use; app.html itself is only the template (build.py fills in the firmware)
+function firmware() {
+  if (!FIRMWARE) {
+    if (FIRMWARE_B64.startsWith("/*")) throw new Error("this is the unbuilt template (webui/app.html): open esp-lora-console.html, or run python3 webui/build.py");
+    FIRMWARE = Uint8Array.from(atob(FIRMWARE_B64), (c) => c.charCodeAt(0));
+  }
+  return FIRMWARE;
+}
+const BWS = [[62500, "62.5 kHz"], [41666.667, "41.7 kHz"], [31250, "31.25 kHz"], [15625, "15.6 kHz"]];
+const SFS = [5, 6, 7, 8, 9, 10, 11];          // SF12 needs bins narrower than the transmitter's carrier jitter (15 Hz at 62.5 kHz)
+const logEl = document.getElementById("log");
+function log(msg, cls = "") {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `${new Date().toLocaleTimeString()}  ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const enc = new TextEncoder();
+const hexOf = (b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join(" ");
+const printable = (b) => Array.from(b).every((x) => x === 9 || x === 10 || x === 13 || (x >= 32 && x < 127));
+const parseHex = (s) => { const t = s.replace(/0x/gi, "").replace(/[^0-9a-f]/gi, ""); if (t.length % 2) throw new Error("odd number of hex digits"); return Uint8Array.from(t.match(/../g) || [], (h) => parseInt(h, 16)); };
+
+// ---------------------------------------------------------------- theme
+const themeBtn = document.getElementById("theme");
+try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) { /* no storage */ }
+themeBtn.onclick = () => {
+  const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("theme", document.documentElement.dataset.theme); } catch (e) { /* no storage */ }
+};
+
+// ---------------------------------------------------------------- decoder worker (keeps the page and the other board's link responsive)
+function makeDecoder(onFrames) {
+  const src = document.getElementById("core-src").textContent + `
+    let dec = null;
+    onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "config") dec = new self.EspCore.RxDecoder(m.fs, m.sf, m.bw, m.opts);
+      else if (m.type === "samples" && dec) {
+        dec.push(m.re, m.im);
+        const t0 = performance.now();
+        const frames = dec.process();
+        if (frames.length || dec.level) postMessage({ frames: frames.map((f) => ({ payload: f.payload, crcOk: f.crcOk, headerOk: f.headerOk, snrDb: f.snrDb, shiftHz: f.shiftHz, t: f.t, cr: f.cr })),
+          ms: performance.now() - t0, backlog: dec.re.length / m.fs });
+      }
+    };`;
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    w.onmessage = (e) => onFrames(e.data);
+    return { config: (c) => w.postMessage(Object.assign({ type: "config" }, c)), push: (re, im) => w.postMessage({ type: "samples", re, im, fs: C.RX_RATE }, [re.buffer, im.buffer]), stop: () => w.terminate() };
+  } catch (e) {
+    log("no worker available; decoding on the page (slower)", "warn");
+    let dec = null;
+    return {
+      config: (c) => { dec = new C.RxDecoder(c.fs, c.sf, c.bw, c.opts); },
+      push: (re, im) => { dec.push(re, im); const f = dec.process(); onFrames({ frames: f, ms: 0, backlog: dec.re.length / C.RX_RATE }); },
+      stop: () => {},
+    };
+  }
+}
+
+// ---------------------------------------------------------------- spectrum and waterfall
+class Scope {
+  constructor(spec, wf) {
+    this.spec = spec; this.wf = wf; this.N = 1024;
+    this.acc = new Float64Array(this.N); this.nAcc = 0;
+    this.buf = { re: new Float32Array(this.N), im: new Float32Array(this.N), n: 0 };
+    this.win = Float64Array.from({ length: this.N }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / this.N));
+    this.last = 0;
+  }
+  feed(re, im) {
+    for (let i = 0; i < re.length; i += 1) {
+      const b = this.buf;
+      b.re[b.n] = re[i]; b.im[b.n] = im[i];
+      if (++b.n === this.N) {
+        b.n = 0;
+        if (this.nAcc < 6) {
+          const r = Float64Array.from(b.re, (v, k) => v * this.win[k]), q = Float64Array.from(b.im, (v, k) => v * this.win[k]);
+          C.fft(r, q);
+          for (let k = 0; k < this.N; k++) this.acc[k] += r[k] * r[k] + q[k] * q[k];
+          this.nAcc++;
+        }
+        i += this.N * 3;            // look at every 4th block only: plenty for a display
+      }
+    }
+    const now = performance.now();
+    if (now - this.last > 90 && this.nAcc) { this.draw(); this.last = now; }
+  }
+  draw() {
+    const N = this.N, db = new Float64Array(N);
+    for (let k = 0; k < N; k++) db[(k + N / 2) % N] = 10 * Math.log10(this.acc[k] / this.nAcc / N + 1e-3);
+    this.acc.fill(0); this.nAcc = 0;
+    const dpr = window.devicePixelRatio || 1;
+    for (const c of [this.spec, this.wf]) { const w = Math.round(c.clientWidth * dpr); if (c.width !== w) { c.width = w; if (c === this.wf) c.getContext("2d").fillRect(0, 0, w, c.height); } }
+    const lo = 0, hi = 50;
+    // spectrum
+    const s = this.spec.getContext("2d"), W = this.spec.width, H = this.spec.height;
+    s.fillStyle = getComputedStyle(document.body).getPropertyValue("--wf-bg"); s.fillRect(0, 0, W, H);
+    s.strokeStyle = "rgba(255,255,255,.12)"; s.lineWidth = 1;
+    s.font = `${10 * dpr}px system-ui`; s.fillStyle = "rgba(255,255,255,.45)";
+    for (const khz of [-100, -50, 0, 50, 100]) { const x = ((khz * 1e3 + 125e3) / 250e3) * W; s.beginPath(); s.moveTo(x, 0); s.lineTo(x, H); s.stroke(); s.fillText(`${khz > 0 ? "+" : ""}${khz} kHz`, x + 3, 11 * dpr); }
+    s.strokeStyle = "#7aa2ff"; s.lineWidth = 1.5 * dpr; s.beginPath();
+    for (let k = 0; k < N; k++) { const x = (k / (N - 1)) * W, y = H - ((db[k] - lo) / (hi - lo)) * H; k ? s.lineTo(x, y) : s.moveTo(x, y); }
+    s.stroke();
+    // waterfall
+    const w = this.wf.getContext("2d"), WW = this.wf.width, HH = this.wf.height;
+    w.drawImage(this.wf, 0, 0, WW, HH - 1, 0, 1, WW, HH - 1);
+    const row = w.createImageData(WW, 1);
+    for (let x = 0; x < WW; x++) {
+      const v = Math.max(0, Math.min(1, (db[Math.floor((x / WW) * N)] - lo - 5) / (hi - lo - 10)));
+      const [r, g, b] = heat(v);
+      row.data[4 * x] = r; row.data[4 * x + 1] = g; row.data[4 * x + 2] = b; row.data[4 * x + 3] = 255;
+    }
+    w.putImageData(row, 0, 0);
+  }
+}
+function heat(v) {   // dark blue -> cyan -> yellow -> white
+  const stops = [[5, 8, 25], [20, 60, 160], [30, 190, 200], [250, 220, 60], [255, 255, 255]];
+  const p = v * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(p)), f = p - i;
+  return stops[i].map((a, k) => Math.round(a + (stops[i + 1][k] - a) * f));
+}
+
+// ---------------------------------------------------------------- a board
+let boardCount = 0;
+class Board {
+  constructor(port) {
+    this.port = port;
+    this.id = ++boardCount;
+    this.el = document.getElementById("card-tpl").content.firstElementChild.cloneNode(true);
+    this.q = (sel) => this.el.querySelector(sel);
+    this.q(".name").textContent = `Board ${this.id}`;
+    document.getElementById("placeholder")?.remove();
+    document.getElementById("boards").appendChild(this.el);
+    for (const sel of [".rx-sf", ".tx-sf"]) this.q(sel).innerHTML = SFS.map((s) => `<option value="${s}"${s === 9 ? " selected" : ""}>SF${s}</option>`).join("");
+    for (const sel of [".rx-bw", ".tx-bw"]) this.q(sel).innerHTML = BWS.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+    this.mode = "rx";
+    this.busy = false;
+    this.el.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => this.setMode(b.dataset.mode)));
+    this.q(".load").onclick = () => this.loadFirmware();
+    this.q(".reboot").onclick = () => this.reboot();
+    this.q(".m-start").onclick = () => this.modemStart();
+    this.q(".m-off").onclick = () => this.modem?.stop().then(() => this.state("LORA32: modem stopped", "warn"), (e) => log(`Board ${this.id}: ${e.message}`, "bad"));
+    this.q(".m-send").onclick = () => this.modemSend();
+    this.q(".m-stop").onclick = () => (this.stopFlag = true);
+    this.q(".m-node").value = String(((this.id - 1) % 254) + 1);
+    ["m-payload", "m-hex", "m-counter"].forEach((c) => this.q("." + c).addEventListener("input", () => this.modemInfo()));
+    this.q(".close").onclick = () => this.close();
+    this.q(".rx-start").onclick = () => this.startRx();
+    this.q(".rx-stop").onclick = () => (this.stopFlag = true);
+    this.q(".rx-clear").onclick = () => (this.q(".rx-list").innerHTML = "");
+    this.q(".rx-save").onclick = () => { this.rec = { parts: [], n: 0, want: 5 * C.RX_RATE }; this.q(".rx-save").disabled = true; this.q(".rx-save").textContent = "Recording …"; };
+    // a new frequency, gain or attenuation while receiving restarts the run with it
+    for (const c of ["rx-freq", "rx-gain", "rx-atten", "ppm"]) this.q("." + c).addEventListener("change", () => { if (this.busy && this.mode === "rx") { this.restartRx = true; this.stopFlag = true; } });
+    this.q(".tx-send").onclick = () => this.send();
+    this.q(".tx-stop").onclick = () => (this.stopFlag = true);
+    const upd = () => this.updateTxInfo();
+    ["tx-freq", "tx-sf", "tx-bw", "tx-cr", "tx-payload", "tx-hex", "tx-counter", "tx-pre"].forEach((c) => this.q("." + c).addEventListener("input", upd));
+    this.scope = new Scope(this.q(".spec"), this.q(".wf"));
+    this.updateTxInfo();
+    const info = port.getInfo();
+    this.label = `USB ${info.usbVendorId?.toString(16)}:${info.usbProductId?.toString(16)}`;
+  }
+  state(text, cls = "") { const s = this.q(".state"); s.textContent = text; s.className = "state " + cls; }
+  setMode(m) {
+    if (this.busy) { log(`Board ${this.id}: stop first`, "warn"); return; }
+    this.mode = m;
+    this.el.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+    this.q(".body.rx").classList.toggle("hidden", m !== "rx");
+    this.q(".body.tx").classList.toggle("hidden", m !== "tx");
+  }
+  async open() {
+    await this.port.open({ baudRate: 115200, bufferSize: 1 << 20 });
+    this.pipe = new C.Pipe(this.port);
+    await this.pipe.start();
+    this.link = new C.Link(this.pipe);
+    await this.probe();
+  }
+  setKind(kind) {
+    this.kind = kind;
+    const lora = kind === "lora32";
+    this.el.querySelectorAll(".sdr-only").forEach((e) => e.classList.toggle("hidden", lora));
+    this.q(".body.modem").classList.toggle("hidden", !lora);
+    this.q(".body.rx").classList.toggle("hidden", lora || this.mode !== "rx");
+    this.q(".body.tx").classList.toggle("hidden", lora || this.mode !== "tx");
+  }
+  async probe() {
+    this.fw = null;
+    try {
+      const info = await this.link.info(800);
+      this.fw = info;
+      this.setKind("sdr");
+      if (!info.tx) { this.state("receiver-only firmware: Load SDR firmware for transmit too", "warn"); }
+      else this.state("ready (esp32-sdr-trx SDR firmware, in RAM)", "ok");
+      return true;
+    } catch (e) { /* not the SDR firmware */ }
+    this.pipe.clear();
+    const m = new C.Lora32(this.pipe, (r) => this.modemRx(r));
+    try {
+      const id = await m.sync();
+      this.modem = m;
+      this.setKind("lora32");
+      this.state(`LORA32 modem firmware (${id.split(" ").slice(1, 2).join("")})`, "ok");
+      this.modemInfo();
+      await this.modemStart();
+      this.pollStats();
+      return true;
+    } catch (e) {
+      m.close();
+      this.setKind("sdr");
+      this.state("no known firmware answers: press Load SDR firmware, or Reboot", "warn");
+      return false;
+    }
+  }
+  // ---- LORA32 modem
+  async modemStart() {
+    if (!this.modem) return;
+    const node = Math.max(1, Math.min(254, Math.round(+this.q(".m-node").value || 1)));
+    const gain = Math.max(0, Math.min(127, Math.round(+this.q(".m-gain").value || 65)));
+    try {
+      await this.modem.start(node, this.q(".m-rel").checked, gain);
+      this.state(`LORA32 modem listening, node ${node}`, "ok");
+      log(`Board ${this.id}: LORA32 modem on as node ${node} (2439.5 MHz, SF7, 1.25 MHz, gain code ${gain})`, "ok");
+    } catch (e) { this.state("modem start failed: " + e.message, "bad"); log(`Board ${this.id}: ${e.message}`, "bad"); }
+  }
+  modemBytes(k) {
+    const raw = this.q(".m-payload").value;
+    let b = this.q(".m-hex").checked ? parseHex(raw) : enc.encode(raw);
+    if (this.q(".m-counter").checked) { const c = enc.encode(` #${k}`); const o = new Uint8Array(b.length + c.length); o.set(b); o.set(c, b.length); b = o; }
+    if (b.length < 1 || b.length > 256) throw new Error("the message must be 1 … 256 bytes");
+    return b;
+  }
+  modemInfo() {
+    try { const b = this.modemBytes(1); this.q(".m-len").textContent = `(${b.length} bytes, ${Math.ceil(b.length / 64)} fragment${b.length > 64 ? "s" : ""})`; }
+    catch (e) { this.q(".m-len").textContent = e.message; }
+  }
+  async modemSend() {
+    if (!this.modem || this.busy) return;
+    const dest = Math.max(1, Math.min(255, Math.round(+this.q(".m-dest").value || 255)));
+    const count = Math.max(1, Math.round(+this.q(".m-count").value || 1)), interval = Math.max(0.2, +this.q(".m-interval").value || 1);
+    this.busy = true; this.stopFlag = false;
+    this.q(".m-send").disabled = true; this.q(".m-stop").disabled = false; this.q(".load").disabled = true;
+    try {
+      for (let k = 1; k <= count && !this.stopFlag; k++) {
+        const b = this.modemBytes(k), t0 = performance.now();
+        const text = printable(b) ? new TextDecoder().decode(b) : hexOf(b);
+        this.q(".m-info").textContent = `sending ${k}/${count} …`;
+        try {
+          const r = await this.modem.send(b, dest);
+          log(`Board ${this.id}: sent ${k}/${count} to ${dest === 255 ? "everyone" : "node " + dest} "${text}" (seq ${r.sequence}, ${r.fragments} fragment${r.fragments > 1 ? "s" : ""}${dest !== 255 && this.q(".m-rel").checked ? ", acknowledged" : ""})`, "ok");
+        } catch (e) {
+          log(`Board ${this.id}: send ${k}/${count} "${text}": ${e.message === "lora_delivery_unconfirmed" || e.message.startsWith("lora_delivery_unconfirmed") ? "no acknowledgement (the other node may still have it)" : e.message}`, "bad");
+        }
+        const wait = interval * 1000 - (performance.now() - t0);
+        for (let t = 0; k < count && t < wait && !this.stopFlag; t += 50) await C.sleep(50);
+      }
+    } finally {
+      this.busy = false; this.q(".m-info").textContent = "";
+      this.q(".m-send").disabled = false; this.q(".m-stop").disabled = true; this.q(".load").disabled = false;
+    }
+  }
+  modemRx(r) {
+    const tr = document.createElement("tr");
+    const text = printable(r.bytes) ? new TextDecoder().decode(r.bytes) : hexOf(r.bytes);
+    [new Date().toLocaleTimeString(), String(r.source), r.destination === 255 ? "all" : String(r.destination), text, r.ok ? "ok" : "bad"].forEach((c, i) => {
+      const td = document.createElement("td"); td.textContent = c;
+      if (i === 3) { td.className = "mono"; td.title = hexOf(r.bytes); }
+      if (i === 4) td.className = r.ok ? "ok" : "bad";
+      tr.appendChild(td);
+    });
+    const list = this.q(".m-list"); list.insertBefore(tr, list.firstChild);
+    log(`Board ${this.id}: received from node ${r.source}: ${text}`, r.ok ? "ok" : "warn");
+  }
+  async pollStats() {
+    const modem = this.modem;
+    while (this.modem === modem && !this.closed) {
+      await C.sleep(3000);
+      if (this.modem !== modem || this.closed) break;
+      try {
+        const s = await modem.stats();
+        this.q(".m-stats").textContent = `receiver ${s.running === "1" ? "on" : "off"} · frames ${s.frames} · header fails ${s.header_fail} · CRC fails ${s.crc_fail} · syncs ${s.syncs} · quality ${s.quality} · overruns ${(+s.overruns || 0) + (+s.bb_overruns || 0)}`;
+      } catch (e) { /* busy or gone: try again later */ }
+    }
+  }
+  async reboot() {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      this.modem?.close(); this.modem = null;
+      this.state("rebooting from flash …");
+      await C.hardReset(this.port);
+      await C.sleep(2500);
+      this.pipe.clear();
+      await this.probe();
+      log(`Board ${this.id}: rebooted (${this.kind === "lora32" ? "LORA32 from flash" : this.fw ? "SDR firmware" : "no known firmware"})`);
+    } catch (e) { this.state("reboot failed: " + e.message, "bad"); log(`Board ${this.id}: reboot failed: ${e.message} (unplug and replug the board)`, "bad"); }
+    finally { this.busy = false; }
+  }
+  async loadFirmware() {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      this.modem?.close(); this.modem = null;
+      await C.sleep(250);
+      this.state("resetting into the ROM loader …");
+      await C.romEnter(this.port, this.pipe, (m) => this.state(m));
+      await C.romLoadRam(this.pipe, firmware(), (f) => this.state(`loading firmware into RAM … ${Math.round(100 * f)} %`));
+      await C.sleep(1200);
+      this.pipe.clear();
+      if (await this.probe()) log(`Board ${this.id}: firmware loaded into RAM`, "ok");
+      else log(`Board ${this.id}: firmware loaded but it does not answer; unplug and replug the board and connect again`, "bad");
+    } catch (e) {
+      this.state("loading failed: " + e.message, "bad");
+      log(`Board ${this.id}: loading failed: ${e.message}`, "bad");
+    } finally { this.busy = false; }
+  }
+  setBusy(b) {
+    this.busy = b;
+    this.q(".rx-start").disabled = b; this.q(".tx-send").disabled = b; this.q(".load").disabled = b;
+    this.q(".rx-stop").disabled = !(b && this.mode === "rx"); this.q(".tx-stop").disabled = !(b && this.mode === "tx");
+    this.q(".rx-save").disabled = !(b && this.mode === "rx") || !!this.rec;
+  }
+  ppm() { const v = parseFloat(this.q(".ppm").value); return isFinite(v) ? v : 0; }
+  rxParams() {
+    return { freq: parseFloat(this.q(".rx-freq").value) * 1e6, gain: parseFloat(this.q(".rx-gain").value), atten: +this.q(".rx-atten").value, sf: +this.q(".rx-sf").value, bw: +this.q(".rx-bw").value,
+      sync: parseInt(this.q(".rx-sync").value), wide: this.q(".rx-wide").checked };
+  }
+  async startRx() {
+    if (this.busy || !this.fw) { if (!this.fw) log(`Board ${this.id}: load the firmware first`, "warn"); return; }
+    const p = this.rxParams();
+    this.setBusy(true); this.stopFlag = false;
+    let decoder;
+    try {
+      const lo = await C.configureReceiver(this.link, p.freq / (1 + this.ppm() * 1e-6), C.gainDbToSel(p.gain), 4 + p.atten / 6);
+      this.rxTune = p.freq;
+      this.state(`receiving ${(p.freq / 1e6).toFixed(3)} MHz, SF${p.sf}, ${(p.bw / 1e3).toFixed(2)} kHz`, "ok");
+      log(`Board ${this.id}: receiving at ${(lo / 1e6).toFixed(6)} MHz (LO), gain ${p.gain} dB (selector ${C.gainDbToSel(p.gain)}), attenuation ${p.atten} dB, SF${p.sf}, BW ${p.bw / 1e3} kHz`);
+      // the decoder (and its buffer) outlives a restart for a new gain, so a frame in progress is not thrown away
+      const key = `${p.sf}/${p.bw}/${p.sync}/${p.wide}`;
+      if (!this.decoder || this.decoderKey !== key) {
+        this.decoder?.stop();
+        this.rxCount = { frames: 0, good: 0, ms: 0, backlog: 0 };
+        const cnt = this.rxCount;
+        this.decoder = makeDecoder((m) => {
+          cnt.ms = m.ms; cnt.backlog = m.backlog;
+          for (const f of m.frames) { cnt.frames++; if (f.crcOk) cnt.good++; this.addFrame(f); }
+        });
+        this.decoder.config({ fs: C.RX_RATE, sf: p.sf, bw: p.bw, opts: { syncWord: p.sync, wide: p.wide } });
+        this.decoderKey = key;
+      }
+      decoder = this.decoder;
+      const cnt = this.rxCount;
+      this.agc = this.agc || { t: performance.now(), clip: 0, n: 0, peak: 0, quietSince: performance.now() };
+      let n = 0, peak = 0, sumsq = 0, nStat = 0, clipped = 0, nWin = 0;
+      const t0 = performance.now();
+      let lastStat = 0;
+      const res = await C.runReceiver(this.link, (re, im, clip) => {
+        n += re.length; clipped += clip; nWin += re.length;
+        for (let i = 0; i < re.length; i += 4) { const v = re[i] * re[i] + im[i] * im[i]; sumsq += v; nStat++; if (v > peak) peak = v; }
+        this.scope.feed(re, im);
+        if (this.rec) this.record(re, im);
+        decoder.push(re, im);
+        const now = performance.now();
+        if (now - lastStat > 500) {
+          lastStat = now;
+          const rms = Math.sqrt(sumsq / Math.max(1, nStat)), pk = Math.sqrt(peak), share = clipped / Math.max(1, nWin);
+          const clipNote = share > 0.001 ? ` <span class="${share > 0.02 ? "bad" : "warn"}">· ${(100 * share).toFixed(share > 0.1 ? 0 : 1)} % of samples clip${share > 0.02 ? ": lower the gain or raise the attenuation" : ""}</span>` : "";
+          this.q(".rx-stats").innerHTML = `${(n / ((now - t0) / 1000) / 1e3).toFixed(0)} ksps · level rms ${rms.toFixed(1)}, peak ${pk.toFixed(0)} (of 127)${clipNote} · frames ${cnt.good}/${cnt.frames} ok · decoder ${cnt.ms.toFixed(0)} ms, backlog ${cnt.backlog.toFixed(1)} s`;
+          peak = 0; sumsq = 0; nStat = 0; clipped = 0; nWin = 0;
+          // automatic gain, in 6 dB steps over 3 s windows (frames come in bursts: a gap between them is not a weak signal): lower when more than
+          // 2 % of the samples clip, raise only when no peak came near full scale for 6 s
+          // The change waits for a quiet half second, because the restart for it must not cut through a frame.
+          const a = this.agc;
+          a.clip += share; a.n += 1;
+          const loud = pk > 40;
+          if (loud) a.quietSince = now;
+          if (this.q(".rx-agc").checked && !this.restartRx) {
+            const g = parseFloat(this.q(".rx-gain").value);
+            if (now - a.t > 3000) {
+              if (a.clip / a.n > 0.02 && g > -30) a.pending = Math.max(-30, g - 6);
+              else if (now - a.quietSince > 6000 && g < 49.6) a.pending = Math.min(49.6, g + 6);
+              a.t = now; a.clip = 0; a.n = 0;
+            }
+            if (a.pending != null && !loud && a.pending !== g) {
+              const ng = a.pending;
+              a.pending = null;
+              if (ng > g) a.quietSince = now;
+              this.q(".rx-gain").value = String(ng);
+              log(`Board ${this.id}: automatic gain ${g} -> ${ng} dB (${ng < g ? "clipping" : "no strong signal for 6 s"})`);
+              this.restartRx = true; this.stopFlag = true;
+            }
+          }
+        }
+      }, () => this.stopFlag);
+      if (res.value) log(`Board ${this.id}: the run failed: ${C.FAIL_NAMES[res.value] || res.value}`, "bad");
+      if (res.stats.lost) log(`Board ${this.id}: ${res.stats.lost} samples lost (USB too slow?)`, "warn");
+      this.state("ready", "ok");
+    } catch (e) {
+      log(`Board ${this.id}: ${e.message}`, "bad");
+      this.state("error: " + e.message, "bad");
+    } finally {
+      if (!this.restartRx) { this.decoder?.stop(); this.decoder = null; this.agc = null; }
+      this.setBusy(false);
+      if (this.restartRx) { this.restartRx = false; setTimeout(() => this.startRx(), 0); }
+    }
+  }
+  record(re, im) {   // collects copies (the decoder takes the originals) and saves when 5 s are there
+    const r = this.rec;
+    const k = Math.min(re.length, r.want - r.n), f = new Float32Array(2 * k);
+    for (let i = 0; i < k; i++) { f[2 * i] = re[i]; f[2 * i + 1] = im[i]; }
+    r.parts.push(f); r.n += k;
+    if (r.n < r.want) return;
+    const p = this.rxParams(), name = `esp-rx-${(p.freq / 1e6).toFixed(3)}MHz-g${p.gain}-a${p.atten}-250ksps-${new Date().toISOString().replace(/[:.]/g, "-")}.cf32`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(r.parts, { type: "application/octet-stream" }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    log(`Board ${this.id}: saved 5 s of I/Q as ${name} (complex float32, 250 ksps, conjugated: a higher RF is a higher frequency)`, "ok");
+    this.rec = null;
+    this.q(".rx-save").textContent = "Save 5 s";
+    this.q(".rx-save").disabled = !this.busy;
+  }
+  addFrame(f) {
+    // a frame from another board on this page: its crystal error shows as the distance between where it aimed and where the frame arrived
+    const tx = lastTx;
+    if (f.crcOk && this.q(".rx-cal").checked && tx && tx.board !== this && performance.now() - tx.t < 15000 && boards.has(tx.board.port)) {
+      const err = this.rxTune + f.shiftHz - tx.centreHz;
+      if (Math.abs(err) > 150 && Math.abs(err) < 150e3) {
+        const ppm = Math.round((tx.ppm + (err / tx.centreHz) * 1e6) * 10) / 10;
+        tx.board.q(".ppm").value = String(ppm);
+        tx.board.updateTxInfo();
+        log(`Board ${this.id}: board ${tx.board.id}'s frame arrived ${(err / 1e3).toFixed(1)} kHz off: its crystal correction is now ${ppm} ppm (frequency and chirp timing)`, "ok");
+        tx.t = 0;                                   // one correction per transmission
+      }
+    }
+    const tr = document.createElement("tr");
+    const p = f.payload ? new Uint8Array(f.payload) : null;
+    const text = p ? (printable(p) ? new TextDecoder().decode(p) : hexOf(p)) : "(header only)";
+    const cells = [new Date().toLocaleTimeString(), text, f.crcOk ? "ok" : "bad", isFinite(f.snrDb) ? f.snrDb.toFixed(1) + " dB" : "", (f.shiftHz / 1e3).toFixed(1) + " kHz"];
+    cells.forEach((c, i) => {
+      const td = document.createElement("td");
+      td.textContent = c;
+      if (i === 1) { td.className = "mono"; if (p && printable(p)) td.title = hexOf(p); }
+      if (i === 2) td.className = f.crcOk ? "ok" : "bad";
+      tr.appendChild(td);
+    });
+    const list = this.q(".rx-list");
+    list.insertBefore(tr, list.firstChild);
+    log(`Board ${this.id}: received ${f.crcOk ? "" : "(CRC error) "}${text}`, f.crcOk ? "ok" : "warn");
+  }
+  txParams() {
+    return { freq: parseFloat(this.q(".tx-freq").value) * 1e6, power: parseFloat(this.q(".tx-power").value), sf: +this.q(".tx-sf").value, bw: +this.q(".tx-bw").value,
+      cr: +this.q(".tx-cr").value, pre: +this.q(".tx-pre").value, sync: parseInt(this.q(".tx-sync").value), count: Math.max(1, +this.q(".tx-count").value),
+      interval: Math.max(0.2, parseFloat(this.q(".tx-interval").value)), hex: this.q(".tx-hex").checked, counter: this.q(".tx-counter").checked };
+  }
+  payload(p, k) {
+    const raw = this.q(".tx-payload").value;
+    let b = p.hex ? parseHex(raw) : enc.encode(raw);
+    if (p.counter) { const c = enc.encode(` #${k}`); const o = new Uint8Array(b.length + c.length); o.set(b); o.set(c, b.length); b = o; }
+    if (b.length < 1 || b.length > 255) throw new Error("the payload must be 1 … 255 bytes");
+    return b;
+  }
+  updateTxInfo() {
+    try {
+      const p = this.txParams();
+      const b = this.payload(p, 1);
+      const dur = (C.symbolsPerFrame(b.length, p.sf, p.cr, p.pre) * (1 << p.sf)) / p.bw;
+      const plan = C.loraPlan(p.freq, p.bw, this.ppm());
+      this.q(".tx-len").textContent = `(${b.length} bytes)`;
+      this.q(".tx-info").textContent = `frame ${(dur * 1e3).toFixed(0)} ms · centre ${(plan.centreHz / 1e6).toFixed(4)} MHz${Math.abs(plan.movedHz) > 1 ? ` (moved ${(plan.movedHz / 1e3).toFixed(1)} kHz)` : ""}${dur > 3.5 ? " · too long (max 3.5 s)" : ""}`;
+    } catch (e) { this.q(".tx-info").textContent = e.message; }
+  }
+  async send() {
+    if (this.busy || !this.fw) { if (!this.fw) log(`Board ${this.id}: load the firmware first`, "warn"); return; }
+    if (!this.fw.tx) { log(`Board ${this.id}: this firmware cannot transmit; press Load firmware`, "warn"); return; }
+    let p;
+    try {
+      p = this.txParams();
+      if (!(p.freq >= C.TX_MIN_HZ && p.freq <= C.TX_MAX_HZ)) throw new Error("the transmitter works from 2320 to 2450 MHz only");
+      if (p.bw > 80000) throw new Error("the transmitter follows at most 80 kHz of bandwidth");
+      C.peakCode(p.power);
+    } catch (e) { log(`Board ${this.id}: ${e.message}`, "bad"); return; }
+    this.setBusy(true); this.stopFlag = false;
+    try {
+      for (let k = 1; k <= p.count && !this.stopFlag; k++) {
+        const plan = C.loraPlan(p.freq, p.bw, this.ppm());      // per frame: a receiver on this page may have corrected the crystal meanwhile
+        lastTx = { board: this, centreHz: plan.centreHz, ppm: this.ppm(), t: performance.now() };
+        const pl = this.payload(p, k);
+        const rec = C.loraRecords(pl, p.sf, p.bw, p.cr, p.power, plan, 40000, p.pre, p.sync);
+        if (rec.length > 3.5 * 40000) throw new Error("the frame is longer than 3.5 s; use fewer bytes or a lower SF");
+        this.state(`transmitting ${k}/${p.count}`, "ok");
+        const t0 = performance.now();
+        const sum = await C.transmit(this.link, plan, rec, (ev, frac) => {
+          this.q(".tx-progress").value = frac;
+          this.q(".tx-stats").textContent = `buffer ${Math.round((ev.fill * 1000) / 40000)} ms · carrier ${ev.carrier ? "on" : "off"} · underruns ${ev.underruns} · late ${ev.late}`;
+        });
+        this.q(".tx-progress").value = 1;
+        const text = printable(pl) ? new TextDecoder().decode(pl) : hexOf(pl);
+        log(`Board ${this.id}: sent ${k}/${p.count} "${text}" (${pl.length} B, SF${p.sf}, ${(rec.length / 40).toFixed(0)} ms): ${sum.text}${sum.underruns ? `, ${sum.underruns} underruns` : ""}`, sum.reason === 0 ? "ok" : "bad");
+        if (sum.reason !== 0) break;
+        const wait = p.interval * 1000 - (performance.now() - t0) + rec.length / 40;
+        for (let t = 0; k < p.count && t < wait && !this.stopFlag; t += 50) await C.sleep(50);
+      }
+      this.state("ready", "ok");
+    } catch (e) {
+      log(`Board ${this.id}: ${e.message}`, "bad");
+      this.state("error: " + e.message, "bad");
+    } finally { this.setBusy(false); }
+  }
+  async close() {
+    this.stopFlag = true; this.closed = true;
+    if (this.modem) {      // LORA32 can wedge when its port closes while the receiver runs: stop it and release the port first
+      try { await this.modem.stop(); await this.modem.request("RELEASE", (l) => l.startsWith("OK") || l.startsWith("ERR"), 2000); } catch (e) { /* gone already */ }
+      this.modem.close();
+    }
+    for (let i = 0; i < 40 && this.busy; i++) await C.sleep(50);
+    try { await this.pipe?.close(); } catch (e) { /* ignore */ }
+    try { await this.port.close(); } catch (e) { /* ignore */ }
+    this.el.remove();
+    boards.delete(this.port);
+    if (!boards.size) document.getElementById("boards").innerHTML = '<div class="empty card" id="placeholder">Connect a board to start. Boards with the esp32-sdr-trx SDR firmware can receive or transmit; boards with LORA32 in their flash work as modems.</div>';
+    log(`Board ${this.id}: disconnected`);
+  }
+}
+
+// ---------------------------------------------------------------- connecting
+const boards = new Map();
+let lastTx = null;            // the latest transmission on this page, for the receivers' crystal correction
+async function attach(port) {
+  if (boards.has(port)) return;
+  const b = new Board(port);
+  boards.set(port, b);
+  try {
+    await b.open();
+    log(`Board ${b.id}: connected (${b.label})${b.fw ? ", firmware running" : ""}`);
+  } catch (e) {
+    b.state("cannot open: " + e.message, "bad");
+    log(`Board ${b.id}: cannot open the port: ${e.message} (another program, e.g. a terminal or espdr tool, may hold it)`, "bad");
+  }
+}
+if (!("serial" in navigator)) {
+  document.getElementById("unsupported").classList.remove("hidden");
+  document.getElementById("add").disabled = true;
+} else {
+  document.getElementById("add").onclick = async () => {
+    try { await attach(await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] })); }
+    catch (e) { if (e.name !== "NotFoundError") log(e.message, "bad"); }
+  };
+  navigator.serial.addEventListener("disconnect", (e) => {
+    const b = boards.get(e.target);
+    if (b) { b.state("unplugged", "bad"); b.stopFlag = true; log(`Board ${b.id}: unplugged`, "bad"); }
+  });
+  if (FIRMWARE_B64.startsWith("/*")) log("This is the unbuilt template (webui/app.html): the firmware is missing, so Load firmware will not work. Open esp-lora-console.html instead.", "bad");
+  log("Ready. Press “Connect board” and choose an ESP32-S3 (USB JTAG/serial debug unit). Boards granted before are reconnected automatically.");
+  navigator.serial.getPorts().then((ports) => ports.forEach((p) => attach(p)));
+}
+</script>
+</body>
+</html>

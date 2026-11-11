@@ -1,0 +1,7 @@
+[submodule "esp32-sdr-trx"]
+	path = esp32-sdr-trx
+	url = https://github.com/jochenhammes/esp32-sdr-trx.git
+	branch = research/iq-tx
+[submodule "LORA32"]
+	path = LORA32
+	url = https://github.com/lozaning/LORA32.git

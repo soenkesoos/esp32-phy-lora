@@ -1,0 +1,13 @@
+{
+  "name": "esp-sdr-lora",
+  "private": true,
+  "description": "Tests for the ESP32-S3 LoRa console (webui/core.js); the hardware and browser tests need two ESP32-S3 boards on native USB",
+  "scripts": {
+    "build": "python3 webui/build.py",
+    "test": "node tests/test_modem.js"
+  },
+  "devDependencies": {
+    "puppeteer": "23.11.1",
+    "serialport": "12.0.0"
+  }
+}
