@@ -1,5 +1,5 @@
 {
-  "name": "esp-sdr-lora",
+  "name": "esp32-phy-lora",
   "private": true,
   "description": "Tests for the ESP32-S3 LoRa console (webui/core.js); the hardware and browser tests need two ESP32-S3 boards on native USB",
   "scripts": {

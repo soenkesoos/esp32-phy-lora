@@ -1,4 +1,4 @@
-# ESP32-S3 LoRa without a LoRa chip
+# esp32-phy-lora: LoRa from the ESP32-S3 Wi-Fi PHY, without a LoRa chip
 
 Experiments in sending and receiving LoRa (chirp spread spectrum) between plain ESP32-S3 boards, using only the chip's own 2.4 GHz Wi-Fi radio,
 and an offline web console to drive them. Two firmwares are covered:
