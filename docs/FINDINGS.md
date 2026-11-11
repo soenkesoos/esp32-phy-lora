@@ -3,10 +3,10 @@
 Measured on 2026-11-11 with two ESP32-S3 dev boards (Embedded PSRAM 8 MB) on their native USB ports, lying next to each other (about 7 cm),
 in an RF-shielded room, on macOS. Numbers come from one pair of boards; treat them as indications, not specifications.
 
-| Board | Port (here) | MAC | Flash |
-|---|---|---|---|
-| A | `/dev/cu.usbmodem11201` | c0:4e:30:0a:b8:f4 | 16 MB |
-| B | `/dev/cu.usbmodem11101` | 30:30:f9:6e:a0:3c | 8 MB |
+| Board | Flash |
+|---|---|
+| A | 16 MB |
+| B | 8 MB |
 
 ## 1. Summary
 
